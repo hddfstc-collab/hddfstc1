@@ -14,9 +14,8 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- ExcelJS & FileSaver (CDN 확인 완료) -->
+    <!-- ExcelJS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <style>
         body { 
             font-family: 'Noto Sans KR', sans-serif; 
@@ -33,6 +32,11 @@
         .loading-dots:after { content: '.'; animation: dots 1.5s steps(5, end) infinite; }
         @keyframes dots { 0%, 20% { color: rgba(0,0,0,0); text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0); } 40% { color: #64748b; text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0); } 60% { text-shadow: .25em 0 0 #64748b, .5em 0 0 rgba(0,0,0,0); } 80%, 100% { text-shadow: .25em 0 0 #64748b, .5em 0 0 #64748b; } }
         .toast-notify { animation: toast-in-out 3s ease-in-out forwards; }
+        .animate-in { animation-fill-mode: both; }
+        .fade-in { animation: fadeIn 0.25s ease-out; }
+        .zoom-in { animation: zoomIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes zoomIn { from { transform: scale(0.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         @keyframes toast-in-out { 0% { transform: translate(-50%, 20px); opacity: 0; } 15% { transform: translate(-50%, 0); opacity: 1; } 85% { transform: translate(-50%, 0); opacity: 1; } 100% { transform: translate(-50%, 20px); opacity: 0; } }
     </style>
 </head>
@@ -52,7 +56,7 @@
     </script>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
         const APP_ID = "hyundai-voice-box-v8";
         const DEFAULT_PASSCODE = "HD6011";
@@ -162,7 +166,12 @@
             }, [submissions, startDate, endDate]);
 
             // 4. 기능 핸들러
-            const triggerToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+            const toastTimerRef = useRef(null);
+            const triggerToast = useCallback((msg) => {
+                if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                setToast(msg);
+                toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+            }, []);
 
             const handleImageResize = (e, callback) => {
                 const file = e.target.files[0];
@@ -171,15 +180,19 @@
                 reader.onload = (ev) => {
                     const img = new Image();
                     img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        let w = img.width, h = img.height;
-                        if (w > 600) { h *= 600 / w; w = 600; }
-                        canvas.width = w; canvas.height = h;
-                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                        callback(canvas.toDataURL('image/jpeg', 0.5));
+                        try {
+                            const canvas = document.createElement('canvas');
+                            let w = img.width, h = img.height;
+                            if (w > 600) { h *= 600 / w; w = 600; }
+                            canvas.width = w; canvas.height = h;
+                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                            callback(canvas.toDataURL('image/jpeg', 0.5));
+                        } catch (err) { setAlertMsg("이미지 처리 중 오류가 발생했습니다."); }
                     };
+                    img.onerror = () => setAlertMsg("이미지를 불러올 수 없습니다.");
                     img.src = ev.target.result;
                 };
+                reader.onerror = () => setAlertMsg("파일을 읽을 수 없습니다.");
                 reader.readAsDataURL(file);
             };
 
@@ -210,6 +223,11 @@
                     triggerToast("암호가 변경되었습니다.");
                     setNewPassField('');
                 } catch (e) { setAlertMsg("변경 실패"); }
+            };
+
+            const handleAdminLogin = () => {
+                if (passInput === adminPasscode) { setPassInput(''); setView('admin_dashboard'); }
+                else { triggerToast("암호 오류"); }
             };
 
             const confirmDelete = async () => {
@@ -265,9 +283,9 @@
 
             if (view === 'admin_dashboard') return (
                 <div className="min-h-screen bg-slate-100 flex flex-col font-black relative overflow-x-hidden">
-                    {/* alertMsg 모달 - admin에도 동일하게 표시 */}
+            {/* 공통 alertMsg 모달 */}
                     {alertMsg && (
-                        <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in">
+                        <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm fade-in">
                             <div className="bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl animate-pop">
                                 <div className="w-14 h-14 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="info"></i></div>
                                 <p className="text-sm font-black text-slate-800 mb-6 keep-all">{alertMsg}</p>
@@ -276,7 +294,7 @@
                         </div>
                     )}
                     {deleteTarget && (
-                        <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in">
+                        <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md fade-in">
                             <div className="bg-white rounded-[35px] p-8 w-full max-w-xs text-center shadow-2xl animate-pop">
                                 <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="trash-2"></i></div>
                                 <h3 className="text-lg font-black text-slate-900 mb-2">영구 삭제</h3>
@@ -289,7 +307,7 @@
                         </div>
                     )}
                     <header className="bg-[#001c3d] text-white p-5 sticky top-0 z-50 flex justify-between items-center shadow-lg font-black">
-                        <h1 className="font-black text-lg flex items-center gap-2 font-black"><i data-lucide="shield-check" className="text-orange-400"></i>관리자</h1>
+                        <h1 className="font-black text-lg flex items-center gap-2"><i data-lucide="shield-check" className="text-orange-400"></i>관리자</h1>
                         <button onClick={() => setView('user')} className="p-2 opacity-60 font-black"><i data-lucide="log-out"></i></button>
                     </header>
                     <nav className="bg-white border-b flex font-black">
@@ -317,7 +335,7 @@
                                         <div key={s.id} className="bg-white p-6 rounded-[32px] shadow-sm border-2 border-white relative font-black">
                                             <button onClick={() => setDeleteTarget(s.id)} className="absolute top-5 right-5 text-slate-200 hover:text-red-500 font-black"><i data-lucide="trash-2" className="w-5 h-5"></i></button>
                                             <div className="flex gap-2 mb-3"><span className={`text-[10px] font-black px-2 py-1 rounded ${s.category === '위험예방' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-400'}`}>{s.category}</span><span className="text-[10px] text-slate-300 italic font-black">{s.timestamp ? new Date(s.timestamp.seconds * 1000).toLocaleString() : '-'}</span></div>
-                                            <p className="text-[15px] font-black text-[#001c3d] mb-1 font-black">[{s.brandName}] {s.userName}</p>
+                                            <p className="text-[15px] font-black text-[#001c3d] mb-1">[{s.brandName}] {s.userName}</p>
                                             <p className="text-slate-600 text-sm leading-relaxed keep-all bg-slate-50 p-4 rounded-2xl mb-3 font-black">{s.description}</p>
                                             {s.imageData && <img src={s.imageData} className="rounded-2xl w-full h-auto border font-black" />}
                                             <div className="mt-3 pt-3 border-t border-slate-50 text-[10px] text-slate-400 font-bold font-black">📱 {s.contact} | 📍 {s.location}</div>
@@ -326,9 +344,9 @@
                                 </div>
                             </div>
                         ) : adminTab === 'popup' ? (
-                            <div className="bg-white p-7 rounded-[40px] shadow-sm space-y-6 animate-in fade-in font-black">
+                            <div className="bg-white p-7 rounded-[40px] shadow-sm space-y-6 fade-in font-black">
                                 <div className="flex justify-between items-center pb-5 border-b font-black">
-                                    <h2 className="font-black text-slate-800 text-lg font-black">팝업 제어</h2>
+                                    <h2 className="font-black text-slate-800 text-lg">팝업 제어</h2>
                                     <label className="relative inline-flex items-center cursor-pointer font-black">
                                         <input type="checkbox" className="sr-only peer" checked={popupConfig.isActive} onChange={e => setPopupConfig({...popupConfig, isActive: e.target.checked})} />
                                         <div className="w-14 h-7 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-[#001c3d] after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:rounded-full after:h-5 after:w-6 after:transition-all font-black"></div>
@@ -337,7 +355,7 @@
                                 <div className="space-y-4 font-black">
                                     <label className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 font-black">
                                         <input type="file" className="hidden" accept="image/*" onChange={e => handleImageResize(e, (data) => setPopupConfig({...popupConfig, popupImage: data}))} />
-                                        <i data-lucide="image-plus" className="text-slate-300 mb-2 w-8 h-8 font-black"></i>
+                                        <i data-lucide="image-plus" className="text-slate-300 mb-2 w-8 h-8"></i>
                                         <span className="text-xs text-slate-400 font-black">팝업 이미지 선택</span>
                                     </label>
                                     {popupConfig.popupImage && <div className="relative"><img src={popupConfig.popupImage} className="rounded-xl w-full h-auto max-h-40 object-contain bg-black/5" /><button onClick={() => setPopupConfig({...popupConfig, popupImage: ''})} className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full"><i data-lucide="x" className="w-3 h-3"></i></button></div>}
@@ -352,16 +370,16 @@
                                 </div>
                                 <button onClick={async () => {
                                     try { await fb.svc.setDoc(fb.svc.doc(fb.db, 'artifacts', APP_ID, 'public', 'data', 'settings', 'popup'), popupConfig); triggerToast("저장되었습니다."); } catch (e) { setAlertMsg("실패"); }
-                                }} className="w-full py-5 bg-[#001c3d] text-white rounded-[25px] font-black text-lg shadow-xl font-black">설정 저장 및 반영</button>
+                                }} className="w-full py-5 bg-[#001c3d] text-white rounded-[25px] font-black text-lg shadow-xl">설정 저장 및 반영</button>
                             </div>
                         ) : (
-                            <div className="bg-white p-8 rounded-[40px] shadow-sm space-y-6 animate-in fade-in font-black">
+                            <div className="bg-white p-8 rounded-[40px] shadow-sm space-y-6 fade-in font-black">
                                 <h2 className="font-black text-slate-800 text-lg">대시보드 패스코드 변경</h2>
                                 <div className="space-y-4 font-black">
                                     <p className="text-xs text-slate-400 keep-all font-black">접근 암호를 변경합니다. (최소 4자리)</p>
                                     <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-blue-50 focus:border-[#001c3d] outline-none font-black" value={newPassField} onChange={e => setNewPassField(e.target.value)} placeholder="새 암호 입력" />
                                 </div>
-                                <button onClick={saveAdminPass} className="w-full py-5 bg-blue-900 text-white rounded-[25px] font-black text-lg shadow-xl font-black">변경 완료</button>
+                                <button onClick={saveAdminPass} className="w-full py-5 bg-blue-900 text-white rounded-[25px] font-black text-lg shadow-xl">변경 완료</button>
                             </div>
                         )}
                     </main>
@@ -372,41 +390,50 @@
             // [VIEW: USER]
             return (
                 <div className="min-h-screen bg-slate-50 flex flex-col relative overflow-x-hidden font-black">
-                    {alertMsg && <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl animate-pop font-black"><div className="w-14 h-14 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-4 font-black"><i data-lucide="info"></i></div><p className="text-sm font-black text-slate-800 mb-6 keep-all">{alertMsg}</p><button onClick={() => setAlertMsg(null)} className="w-full py-3 bg-[#001c3d] text-white rounded-2xl font-black">확인</button></div></div>}
-                    {showPopup && popupConfig.isActive && (
-                        <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 modal-overlay animate-in fade-in font-black">
+            {/* 공통 alertMsg 모달 */}
+                    {alertMsg && (
+                        <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm fade-in">
+                            <div className="bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl animate-pop">
+                                <div className="w-14 h-14 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="info"></i></div>
+                                <p className="text-sm font-black text-slate-800 mb-6 keep-all">{alertMsg}</p>
+                                <button onClick={() => setAlertMsg(null)} className="w-full py-3 bg-[#001c3d] text-white rounded-2xl font-black">확인</button>
+                            </div>
+                        </div>
+                    )}
+                    {showPopup && (
+                        <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 modal-overlay fade-in font-black">
                             <div className="bg-white rounded-[40px] shadow-2xl w-full max-w-md overflow-hidden animate-pop font-black">
                                 {popupConfig.popupImage && <div className="w-full bg-slate-50 flex justify-center"><img src={popupConfig.popupImage} className="w-full h-auto object-contain max-h-[50vh]" /></div>}
                                 {(popupConfig.title || popupConfig.subtitle || popupConfig.r1Title) && (
                                     <div className="p-8 space-y-6">
                                         <div className="text-center font-black">
-                                            <h3 className="text-2xl font-900 text-[#001c3d] tracking-tighter keep-all">{popupConfig.title}</h3>
+                                            <h3 className="text-2xl font-black text-[#001c3d] tracking-tighter keep-all">{popupConfig.title}</h3>
                                             {popupConfig.subtitle && <p className="text-sm text-slate-400 italic mt-1 font-black">"{popupConfig.subtitle}"</p>}
                                         </div>
                                         <div className="grid grid-cols-1 gap-3 font-black">
-                                            {popupConfig.r1Title && <div className="flex items-center gap-4 bg-orange-50 p-5 rounded-[25px] border border-orange-100 font-black"><div className="w-10 h-10 bg-orange-500 text-white rounded-full flex items-center justify-center shrink-0 font-black"><i data-lucide="coffee"></i></div><div className="text-left font-black"><p className="text-xs text-orange-600 font-bold italic font-black">{popupConfig.r1Title}</p><p className="text-lg font-black text-slate-800 keep-all font-black">{popupConfig.r1Value}</p></div></div>}
-                                            {popupConfig.r2Title && <div className="flex items-center gap-4 bg-blue-50 p-5 rounded-[25px] border border-blue-100 font-black"><div className="w-10 h-10 bg-blue-900 text-white rounded-full flex items-center justify-center shrink-0 font-black"><i data-lucide="trophy"></i></div><div className="text-left font-black"><p className="text-xs text-blue-700 font-bold italic font-black">{popupConfig.r2Title}</p><p className="text-lg font-black text-slate-800 keep-all font-black">{popupConfig.r2Value}</p></div></div>}
+                                            {popupConfig.r1Title && <div className="flex items-center gap-4 bg-orange-50 p-5 rounded-[25px] border border-orange-100 font-black"><div className="w-10 h-10 bg-orange-500 text-white rounded-full flex items-center justify-center shrink-0 font-black"><i data-lucide="coffee"></i></div><div className="text-left font-black"><p className="text-xs text-orange-600 font-bold italic font-black">{popupConfig.r1Title}</p><p className="text-lg font-black text-slate-800 keep-all">{popupConfig.r1Value}</p></div></div>}
+                                            {popupConfig.r2Title && <div className="flex items-center gap-4 bg-blue-50 p-5 rounded-[25px] border border-blue-100 font-black"><div className="w-10 h-10 bg-blue-900 text-white rounded-full flex items-center justify-center shrink-0 font-black"><i data-lucide="trophy"></i></div><div className="text-left font-black"><p className="text-xs text-blue-700 font-bold italic font-black">{popupConfig.r2Title}</p><p className="text-lg font-black text-slate-800 keep-all">{popupConfig.r2Value}</p></div></div>}
                                         </div>
                                     </div>
                                 )}
                                 <div className="p-8 pt-0 font-black">
-                                    <button onClick={() => setShowPopup(false)} className="w-full py-5 bg-[#001c3d] text-white rounded-[25px] font-black text-lg shadow-xl tracking-widest font-black">확인했습니다</button>
+                                    <button onClick={() => setShowPopup(false)} className="w-full py-5 bg-[#001c3d] text-white rounded-[25px] font-black text-lg shadow-xl tracking-widest">확인했습니다</button>
                                 </div>
                             </div>
                         </div>
                     )}
                     {view === 'admin_login' && (
-                        <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-slate-50 animate-in zoom-in duration-300">
+                        <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-slate-50 zoom-in duration-300">
                             <div className="bg-white p-10 rounded-[50px] shadow-2xl w-full max-w-xs text-center border">
                                 <div className="w-16 h-16 bg-blue-50 text-blue-900 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner"><i data-lucide="lock"></i></div>
                                 <p className="text-xs text-slate-400 mb-8 font-black uppercase tracking-widest">Admin Auth</p>
                                 <input type="password" placeholder="비밀번호" className="w-full p-4 bg-slate-50 rounded-2xl text-center text-lg font-black border-none outline-none focus:ring-2 focus:ring-[#001c3d]/10 mb-4"
                                     value={passInput}
                                     onChange={e => setPassInput(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Enter') { if (passInput === adminPasscode) { setPassInput(''); setView('admin_dashboard'); } else { triggerToast("암호 오류"); } } }}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleAdminLogin(); }}
                                     autoFocus />
                                 <div className="flex gap-2">
-                                    <button onClick={() => { if (passInput === adminPasscode) { setPassInput(''); setView('admin_dashboard'); } else { triggerToast("암호 오류"); } }} className="flex-grow py-4 bg-[#001c3d] text-white rounded-2xl font-black shadow-xl">인증</button>
+                                    <button onClick={handleAdminLogin} className="flex-grow py-4 bg-[#001c3d] text-white rounded-2xl font-black shadow-xl">인증</button>
                                     <button onClick={() => { setPassInput(''); setView('user'); }} className="px-5 bg-slate-100 text-slate-400 rounded-2xl font-black">취소</button>
                                 </div>
                             </div>
@@ -414,25 +441,25 @@
                     )}
                     
                     {isSuccess ? (
-                        <div className="flex-grow flex flex-col items-center justify-center p-10 text-center animate-in fade-in font-black">
-                            <i data-lucide="check-circle-2" className="w-24 h-24 text-green-500 mb-8 font-black"></i>
-                            <h2 className="text-3xl font-black text-slate-900 mb-4 tracking-tighter leading-tight keep-all font-black">접수가 완료되었습니다!</h2>
+                        <div className="flex-grow flex flex-col items-center justify-center p-10 text-center fade-in font-black">
+                            <i data-lucide="check-circle-2" className="w-24 h-24 text-green-500 mb-8"></i>
+                            <h2 className="text-3xl font-black text-slate-900 mb-4 tracking-tighter leading-tight keep-all">접수가 완료되었습니다!</h2>
                             <p className="text-slate-500 text-sm mb-12 keep-all font-black">총무팀에서 신속하게 확인하겠습니다.</p>
-                            <button onClick={() => { setIsSuccess(false); setFormData({brandName:'', userName:'', contact:'', category:'위험예방', location:'', description:'', imageData: ''}); }} className="w-full max-w-sm py-5 bg-[#001c3d] text-white rounded-[25px] font-black text-lg shadow-xl font-black">처음으로 돌아가기</button>
+                            <button onClick={() => { setIsSuccess(false); setFormData({brandName:'', userName:'', contact:'', category:'위험예방', location:'', description:'', imageData: ''}); }} className="w-full max-w-sm py-5 bg-[#001c3d] text-white rounded-[25px] font-black text-lg shadow-xl">처음으로 돌아가기</button>
                         </div>
                     ) : (
                         <>
-                            <header className="bg-[#001c3d] text-white p-10 rounded-b-[60px] shadow-2xl text-center sticky top-0 z-40 font-black overflow-hidden font-black">
+                            <header className="bg-[#001c3d] text-white p-10 rounded-b-[60px] shadow-2xl text-center sticky top-0 z-40 font-black overflow-hidden">
                                 <div className="relative z-10 flex flex-col items-center font-black">
                                     <p className="text-orange-400 font-black text-[11px] tracking-[0.5em] mb-3 uppercase">Staff Voice Box</p>
-                                    <h1 className="text-4xl font-black tracking-tighter font-black">직원 소리함</h1>
+                                    <h1 className="text-4xl font-black tracking-tighter">직원 소리함</h1>
                                     <p className="text-slate-400 text-[13px] font-light mt-2 opacity-70 italic keep-all text-center">무역센터점 임직원 전용 창구</p>
                                 </div>
                             </header>
-                            <main className="px-5 py-8 space-y-10 animate-in fade-in font-black">
+                            <main className="px-5 py-8 space-y-10 fade-in font-black">
                                 <div className="bg-white p-9 space-y-7 shadow-md border border-slate-100 text-center rounded-[45px] font-black">
                                     <p className="text-slate-700 text-[17px] leading-relaxed font-bold tracking-tight keep-all">근무 환경 개선 및 안전 사고 예방을 위해 자유롭게 제안해 주세요.</p>
-                                    <div className="space-y-4 text-[14px] text-slate-600 leading-relaxed bg-slate-50 p-7 rounded-[35px] text-left font-bold font-black keep-all font-black">
+                                    <div className="space-y-4 text-[14px] text-slate-600 leading-relaxed bg-slate-50 p-7 rounded-[35px] text-left font-bold font-black keep-all">
                                         <p className="font-black"><strong className="text-orange-600 font-black">🚨 위험 예방</strong> : 현장 사고 우려 요인 제보 (Reward 대상)</p>
                                         <p className="font-black"><strong className="text-blue-900 font-black">🛠 시설 관리</strong> : 전기, 보수 민원 접수</p>
                                         <p className="font-black"><strong className="text-slate-800 font-black">📋 일반 민원</strong> : 기타 근무 환경 건의 사항</p>
@@ -450,35 +477,35 @@
                                         </div>
                                     </div>
                                     <div className="space-y-5 font-black flex flex-col items-center">
-                                        <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest keep-all font-black">2. 제안 분류 *</label>
+                                        <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest keep-all">2. 제안 분류 *</label>
                                         <div className="space-y-3 w-full font-black">
                                             {[ {id:'위험예방', label:'🚨 위험 예방'}, {id:'시설관리', label:'🛠 시설 관리'}, {id:'일반민원', label:'📋 일반 민원'} ].map(c => (
                                                 <button key={c.id} type="button" onClick={() => setFormData({...formData, category: c.id})} className={`w-full p-6 rounded-[35px] border-2 flex items-center justify-between shadow-sm font-black ${formData.category === c.id ? (c.id === '위험예방' ? 'border-orange-500 bg-orange-50' : 'border-[#001c3d] bg-slate-50') : 'border-white bg-white'}`}><p className={`font-black text-[16px] ${formData.category === c.id ? (c.id === '위험예방' ? 'text-orange-700' : 'text-[#001c3d]') : 'text-slate-800'}`}>{c.label}</p>{formData.category === c.id && <div className={`w-3 h-3 rounded-full animate-pulse ${c.id === '위험예방' ? 'bg-orange-500' : 'bg-[#001c3d]'}`}></div>}</button>
                                             ))}
                                         </div>
                                     </div>
-                                    <div className="space-y-5 font-black flex flex-col items-center pt-2 font-black">
-                                        <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest keep-all font-black">3. 상세 내용 *</label>
+                                    <div className="space-y-5 font-black flex flex-col items-center pt-2">
+                                        <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest keep-all">3. 상세 내용 *</label>
                                         <div className="bg-white p-8 rounded-[45px] shadow-xl border border-slate-50 w-full space-y-4 font-black">
                                             <input type="text" placeholder="위치 (예: 3층 직원식당 입구)" className="w-full p-5 bg-slate-50 rounded-2xl text-[15px] font-black border-none outline-none shadow-inner" value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} />
-                                            <textarea rows="5" placeholder="상황을 구체적으로 설명해 주세요." className="w-full p-6 bg-slate-50 rounded-2xl text-[15px] font-black border-none outline-none shadow-inner leading-relaxed keep-all font-black" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+                                            <textarea rows="5" placeholder="상황을 구체적으로 설명해 주세요." className="w-full p-6 bg-slate-50 rounded-2xl text-[15px] font-black border-none outline-none shadow-inner leading-relaxed keep-all" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
                                         </div>
                                     </div>
-                                    <div className="space-y-5 font-black flex flex-col items-center pt-2 font-black">
-                                        <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest keep-all font-black">현장 사진 첨부 (선택)</label>
-                                        <label className="bg-white p-10 rounded-[45px] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer w-full font-black active:bg-slate-50 transition-colors font-black">
+                                    <div className="space-y-5 font-black flex flex-col items-center pt-2">
+                                        <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest keep-all">현장 사진 첨부 (선택)</label>
+                                        <label className="bg-white p-10 rounded-[45px] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer w-full font-black active:bg-slate-50 transition-colors">
                                             {/* 카메라 기능: capture 속성 추가하여 모바일 기기에서 바로 카메라를 호출하거나 갤러리를 선택하게 함 */}
                                             <input type="file" className="hidden" accept="image/*" onChange={e => handleImageResize(e, (data) => setFormData({...formData, imageData: data}))} />
-                                            <i data-lucide="camera" className="text-slate-300 mb-3 w-12 h-12 font-black"></i>
+                                            <i data-lucide="camera" className="text-slate-300 mb-3 w-12 h-12"></i>
                                             <span className="text-[14px] font-black text-slate-400">사진 촬영 또는 갤러리 선택</span>
                                         </label>
-                                        {formData.imageData && <div className="w-full rounded-[40px] overflow-hidden border-4 border-white shadow-xl animate-in zoom-in font-black"><img src={formData.imageData} className="w-full h-auto" /></div>}
+                                        {formData.imageData && <div className="w-full rounded-[40px] overflow-hidden border-4 border-white shadow-xl zoom-in font-black"><img src={formData.imageData} className="w-full h-auto" /></div>}
                                     </div>
-                                    <button type="submit" disabled={isSubmitting} className={`w-full py-8 rounded-[40px] font-black text-xl shadow-2xl active:scale-95 transition-all text-white font-black ${isSubmitting ? 'bg-slate-400' : 'bg-[#001c3d] shadow-blue-200'}`}>{isSubmitting ? '전송 중...' : '제안 제출하기'}</button>
+                                    <button type="submit" disabled={isSubmitting} className={`w-full py-8 rounded-[40px] font-black text-xl shadow-2xl active:scale-95 transition-all text-white ${isSubmitting ? 'bg-slate-400' : 'bg-[#001c3d] shadow-blue-200'}`}>{isSubmitting ? '전송 중...' : '제안 제출하기'}</button>
                                 </form>
                                 <footer className="text-center pt-8 pb-16 space-y-12 border-t border-slate-100 flex flex-col items-center font-black">
-                                    <div className="inline-block bg-white px-12 py-5 rounded-full text-[14px] text-slate-400 font-black shadow-sm border font-black tracking-tighter">문의 (내선): 6011, 6034</div>
-                                    <button onClick={() => setView('admin_login')} className="text-[11px] text-slate-300 uppercase tracking-widest flex items-center gap-2 font-black transition-colors font-black"><i data-lucide="settings" className="w-3 h-3 font-black"></i> Admin Access</button>
+                                    <div className="inline-block bg-white px-12 py-5 rounded-full text-[14px] text-slate-400 font-black shadow-sm border tracking-tighter">문의 (내선): 6011, 6034</div>
+                                    <button onClick={() => setView('admin_login')} className="text-[11px] text-slate-300 uppercase tracking-widest flex items-center gap-2 font-black transition-colors"><i data-lucide="settings" className="w-3 h-3"></i> Admin Access</button>
                                     <p className="text-[10px] text-slate-300 opacity-60 uppercase font-black">© Hyundai Department Store Duty Free</p>
                                 </footer>
                             </main>
